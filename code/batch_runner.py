@@ -1,25 +1,9 @@
 """
-batch_runner.py
-
 Batch runner for The OH Race Project — executes multiple headless simulations
 (without opening any UI windows) and saves detailed per-run CSV logs.
 
-Each run:
-    • Builds the world deterministically from a fixed seed.
-    • Runs all 3 search algorithms (HC / SHC / SA).
-    • Executes movement simulation for each agent.
-    • Saves a long-format CSV: one row per coordinate visited by each agent.
-
-Usage:
-    python3 batch_runner.py
-
-Output:
-    A folder "batch_results_YYYYMMDD_HHMMSS/"
-    containing:
-        run_01_seed_1.csv
-        run_02_seed_2.csv
-        ...
-        run_30_seed_30.csv
+See conversation for rationale: csv writer is defensive about different trace
+formats and guarantees per-step score/timer/reason are written when available.
 """
 
 import os
@@ -55,11 +39,6 @@ OVERRIDES = {
     "angry_main":    aua_setup.CONFIG.get("angry_main", 4),
     "angry_pab":     aua_setup.CONFIG.get("angry_pab", 2),
     "angry_bridge":  aua_setup.CONFIG.get("angry_bridge", 1),
-
-    # Algorithm overrides (optional)
-    # "agent1_algo": "hc",
-    # "agent2_algo": "shc",
-    # "agent3_algo": "sa",
 }
 
 # ============================================================
@@ -71,12 +50,68 @@ def ensure_outdir(path: str):
     os.makedirs(path, exist_ok=True)
 
 
+def _extract_step_fields(step, agent_defaults):
+    """
+    Robustly extract pos, score, timer, reason from a step object.
+    Accepts:
+      - step: dict with keys like 'pos', 'score', 'timer', 'time', 'points', 'energy', 'reason', 'status'
+      - step: tuple/list (x,y)
+      - agent_defaults: dict with fallback values (final score/timer/reason)
+    Returns: (x, y, score, timer, reason)
+    """
+
+    default_score = agent_defaults.get("score", "")
+    default_timer = agent_defaults.get("timer", "")
+    default_reason = agent_defaults.get("reason", "normal")
+
+    x = y = None
+    score = default_score
+    timer = default_timer
+    reason = default_reason
+
+    if isinstance(step, dict):
+        pos = step.get("pos") or step.get("position") or step.get("p")
+        if pos and isinstance(pos, (list, tuple)) and len(pos) >= 2:
+            x, y = int(pos[0]), int(pos[1])
+        else:
+            if "x" in step and "y" in step:
+                try:
+                    x, y = int(step["x"]), int(step["y"])
+                except Exception:
+                    x = y = None
+
+        if "score" in step:
+            score = step.get("score")
+        elif "points" in step:
+            score = step.get("points")
+        elif "energy" in step:
+            score = step.get("energy")
+
+        if "timer" in step:
+            timer = step.get("timer")
+        elif "time" in step:
+            timer = step.get("time")
+        elif "remaining" in step:
+            timer = step.get("remaining")
+
+        reason = step.get("reason") or step.get("status") or step.get("event") or default_reason
+
+    elif isinstance(step, (list, tuple)) and len(step) >= 2:
+        try:
+            x, y = int(step[0]), int(step[1])
+        except Exception:
+            x = y = None
+
+    return x, y, score, timer, reason
+
+
 def save_run_csv(out_dir, run_index, seed, grid, placement, agents):
     """
     Save one CSV per run in long format.
     Each row = one coordinate visited by a specific agent at a specific step.
+    Columns (exact order):
+      agent_id, algo, score, timer, reason, steps, space, step_index, x, y
     """
-
     fname = os.path.join(out_dir, f"run_{run_index:02d}_seed_{seed}.csv")
 
     with open(fname, "w", newline="") as f:
@@ -88,25 +123,58 @@ def save_run_csv(out_dir, run_index, seed, grid, placement, agents):
         ])
 
         for a in agents:
-            aid = a["id"]
-            algo = a["algo"]
-            score = a["score"]
-            timer = a["timer"]
-            reason = a["reason"]
-            metrics = a["metrics"]
+            aid = a.get("id", "")
+            algo = a.get("algo", "")
+            trace = a.get("trace")
+            if trace is None:
+                trace = a.get("mtrace") or a.get("path") or []
+            metrics = a.get("metrics", {})
 
             steps = metrics.get("steps", "")
             space = metrics.get("space", "")
-            path = a["path"]
 
-            for step_index, (x, y) in enumerate(path):
+            if not trace:
                 writer.writerow([
-                    aid, algo, score, timer, reason,
-                    steps, space,
-                    step_index, x, y
+                    aid,
+                    algo,
+                    a.get("score", ""),
+                    a.get("timer", ""),
+                    a.get("reason", "normal"),
+                    steps,
+                    space,
+                    0,
+                    placement.start[0],
+                    placement.start[1],
+                ])
+                continue
+
+            for step_index, step in enumerate(trace):
+                x, y, score, timer, reason = _extract_step_fields(step, a)
+
+                try:
+                    xi = int(x) if x is not None else ""
+                except Exception:
+                    xi = ""
+                try:
+                    yi = int(y) if y is not None else ""
+                except Exception:
+                    yi = ""
+
+                writer.writerow([
+                    aid,
+                    algo,
+                    score,
+                    timer,
+                    reason,
+                    steps,
+                    space,
+                    step_index,
+                    xi,
+                    yi
                 ])
 
     print("Saved:", fname)
+
 
 # ============================================================
 # SINGLE RUN EXECUTION
@@ -221,8 +289,21 @@ def run_one(run_index: int, seed: int, out_dir: str):
 
         anim_trace = []
         for step in mtrace:
-            px, py = step["pos"]
-            anim_trace.append((int(px), int(py)))
+            if isinstance(step, dict):
+                pos = step.get("pos") or step.get("position")
+                if pos and isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                    anim_trace.append((int(pos[0]), int(pos[1])))
+                else:
+                    if "x" in step and "y" in step:
+                        try:
+                            anim_trace.append((int(step["x"]), int(step["y"])))
+                        except Exception:
+                            pass
+            elif isinstance(step, (list, tuple)) and len(step) >= 2:
+                try:
+                    anim_trace.append((int(step[0]), int(step[1])))
+                except Exception:
+                    pass
 
         if not anim_trace:
             anim_trace = [start]
@@ -236,9 +317,23 @@ def run_one(run_index: int, seed: int, out_dir: str):
         metrics.setdefault("steps", max(0, len(mtrace) - 1))
         metrics.setdefault("space", int(metrics.get("space", 0)))
 
-        final_score = mtrace[-1].get("score", 0)
-        final_time  = mtrace[-1].get("timer", 0)
-        reason      = mtrace[-1].get("reason", "")
+        final_score = None
+        final_time = None
+        final_reason = None
+        if isinstance(mtrace, list) and mtrace:
+            last = mtrace[-1]
+            if isinstance(last, dict):
+                final_score = last.get("score") or last.get("points") or last.get("energy") or 0
+                final_time  = last.get("timer") or last.get("time") or last.get("remaining") or 0
+                final_reason = last.get("reason") or last.get("status") or ""
+            elif isinstance(last, (list, tuple)):
+                final_score = 0
+                final_time = 0
+                final_reason = ""
+        else:
+            final_score = 0
+            final_time = 0
+            final_reason = ""
 
         agents.append({
             "id": aid,
@@ -246,8 +341,9 @@ def run_one(run_index: int, seed: int, out_dir: str):
             "pos": start,
             "score": final_score,
             "timer": final_time,
-            "reason": reason,
+            "reason": final_reason,
             "path": anim_trace,
+            "trace": mtrace,
             "metrics": {
                 "steps": metrics["steps"],
                 "space": metrics["space"],
@@ -257,6 +353,7 @@ def run_one(run_index: int, seed: int, out_dir: str):
     save_run_csv(out_dir, run_index, seed, grid, placement, agents)
 
     return agents
+
 
 # ============================================================
 # MAIN BATCH LOOP
