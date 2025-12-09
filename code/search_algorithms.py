@@ -807,3 +807,108 @@ def run_with_metrics(grid, placement, path, start_points, start_time):
             "reason": "normal"
         })
     return results
+
+# ------------------------------------------------------------
+# run_with_metrics for batch_runner.py
+# uncomment only when running batch_runner.py
+# ------------------------------------------------------------
+
+# def run_with_metrics(grid, placement, path, start_points, start_time):
+#     """
+#     Reconstruct a *synthetic* per-step metric trace for batch_runner output.
+#
+#     This function is **not** used by the interactive UI and **not** used for
+#     the real simulation loop inside the controller. It is exclusively used by
+#     the batch_runner to reinterpret an algorithm-produced path and convert it
+#     into a step-by-step record suitable for CSV export (score, time, reason).
+#
+#     Its purpose is to give the batch runner a consistent, controller-like
+#     interpretation of movement effects **without running the UI engine**.
+#     In other words, it emulates the controller’s cost rules so that offline
+#     runs produce correct and comparable CSVs.
+#
+#     Returned trace:
+#         A list of dicts, one entry per simulated step:
+#         {
+#             "pos": (x, y),
+#             "score": int,
+#             "timer": int,
+#             "reason": str,
+#         }
+#
+#     Interpretation rules (mirrors controller.fallback_run_with_metrics):
+#         • Each step applies a base movement cost:
+#               timer -= 1
+#               score -= 1
+#         • Stepping on world.ANGRY costs an additional -150 (reason="angry")
+#         • Stepping on world.CHAIR immediately zeroes score (reason="chair")
+#         • Stepping on placement.office or world.OFFICE marks reason="goal"
+#         • score <= 0 → stop, last step reason="no_points"
+#         • timer <= 0 → stop, last step reason="no_time"
+#
+#     Additional notes:
+#         • Path entries may be tuples or dicts; coordinates are extracted
+#           defensively and clamped to grid bounds.
+#         • If the provided path is empty or all steps are invalid, the trace
+#           falls back to a single record at the starting tile.
+#         • This function does *not* simulate collisions, animations or
+#           multi-agent rules — it only produces a metric timeline for CSV.
+#     """
+#     trace = []
+#     score = int(start_points)
+#     timer = int(start_time)
+
+#     if not path:
+#         sx, sy = placement.start
+#         return [{"pos": (sx, sy), "score": score, "timer": timer, "reason": "done"}]
+
+#     for p in path:
+#         try:
+#             if isinstance(p, dict):
+#                 pos = p.get("pos") or p.get("position") or p.get("p")
+#                 if pos and isinstance(pos, (list, tuple)):
+#                     x, y = int(pos[0]), int(pos[1])
+#                 else:
+#                     x, y = int(p.get("x", placement.start[0])), int(p.get("y", placement.start[1]))
+#             else:
+#                 x, y = int(p[0]), int(p[1])
+#         except Exception:
+#             continue
+
+#         if y < 0 or y >= len(grid) or x < 0 or x >= len(grid[0]):
+#             continue
+
+#         timer = max(0, timer - 1)
+#         score = max(0, score - 1)
+
+#         reason = "normal"
+#         cell = grid[y][x]
+
+#         try:
+#             if cell == world.ANGRY:
+#                 score = max(0, score - 150)
+#                 reason = "angry"
+#             if cell == world.CHAIR:
+#                 score = 0
+#                 reason = "chair"
+#             if (x, y) == getattr(placement, "office", None) or cell == world.OFFICE:
+#                 reason = "goal"
+#         except Exception:
+#             pass
+
+#         trace.append({"pos": (x, y), "score": score, "timer": timer, "reason": reason})
+
+#         if reason in ("chair", "goal") or score <= 0 or timer <= 0:
+#             # if reason was set by office/chair/angry and should terminate, break
+#             # ensure final reason is descriptive for CSV
+#             if score <= 0 and reason not in ("chair", "goal"):
+#                 trace[-1]["reason"] = "no_points"
+#             if timer <= 0 and reason not in ("chair", "goal"):
+#                 trace[-1]["reason"] = "no_time"
+#             break
+
+#     if not trace:
+#         sx, sy = placement.start
+#         trace.append({"pos": (sx, sy), "score": start_points, "timer": start_time, "reason": "done"})
+
+#     return trace
