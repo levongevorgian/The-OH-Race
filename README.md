@@ -27,12 +27,7 @@ handling.
 
 #### [`search_algorithms.py`](search_algorithms.py)
 
-Implements 9 algorithms: - BFS\
-- DFS\
-- UCS\
-- Greedy Best-First Search\
-- A\*\
-- Weighted A\*\
+Implements 9 algorithms (different extensions of 3 local search algorithms): 
 - Hill Climbing\
 - Simulated Annealing\
 - Random Restart Local Search
@@ -91,33 +86,8 @@ Each CSV includes: - Steps\
 
 ------------------------------------------------------------------------
 
-## 📑 Report and Visualizations
-
-### `report/`
-
-This folder contains the academic components of the project:
-
--   **`final_report.pdf`**\
+-   **`The_OH_Race.pdf`**\
     The complete academic report submitted for the course.
-
--   **`analysis.Rmd`**\
-    An R Markdown script containing:
-
-    -   CSV loading
-    -   Data aggregation
-    -   Visualizations (boxplots, comparisons)
-    -   Algorithm performance analysis
-
--   **`analysis.pdf`**\
-    The knitted output of `analysis.Rmd`, containing:
-
-    -   Final figures\
-    -   Plots\
-    -   Statistical summaries\
-    -   Explanation of findings
-
-**The R Markdown workflow allows complete reproducibility of the plots
-and statistical analysis in the report.**
 
 ------------------------------------------------------------------------
 
